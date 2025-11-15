@@ -26,15 +26,29 @@ if (isset($_POST['action_sale']) && validateCsrfToken()) {
                 throw new Exception("Le panier est vide.");
             }
             
-            // Vérifier les prix avant de créer la vente
+            // Vérifier les stocks disponibles AVANT de créer la vente - CORRECTION ICI
             foreach ($cart_items as $item) {
                 $product_id = (int)$item['product_id'];
                 $stock_id = (int)$item['stock_id'];
                 $quantity = (int)$item['quantity'];
                 $unit_price = (float)$item['unit_price'];
                 
-                // Vérifier la disponibilité du stock
-                $stmt = $pdo->prepare("SELECT current_quantity, price as cost_price FROM stock WHERE id = ?");
+                // Vérifier la disponibilité réelle du stock (en prenant en compte les ventes en cours)
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        s.current_quantity, 
+                        s.price as cost_price,
+                        COALESCE((
+                            SELECT SUM(si.quantity) 
+                            FROM sale_items si 
+                            JOIN sales sa ON si.sale_id = sa.id 
+                            WHERE si.stock_id = s.id 
+                            AND sa.statut = 1 
+                            AND si.statut = 1
+                        ), 0) as reserved_quantity
+                    FROM stock s 
+                    WHERE s.id = ?
+                ");
                 $stmt->execute([$stock_id]);
                 $stock = $stmt->fetch(PDO::FETCH_ASSOC);
                 
@@ -42,18 +56,20 @@ if (isset($_POST['action_sale']) && validateCsrfToken()) {
                     throw new Exception("Stock introuvable.");
                 }
                 
-                if ($stock['current_quantity'] < $quantity) {
-                    throw new Exception("Stock insuffisant pour l'article sélectionné.");
-                }
+                $available_quantity = $stock['current_quantity'] - $stock['reserved_quantity'];
                 
-                // Vérifier que le prix de vente n'est pas inférieur au coût d'achat
-                if ($unit_price < $stock['cost_price']) {
+                if ($available_quantity < $quantity) {
                     // Récupérer le nom du produit pour le message d'erreur
                     $stmt = $pdo->prepare("SELECT name FROM products WHERE id = ?");
                     $stmt->execute([$product_id]);
                     $product = $stmt->fetch(PDO::FETCH_ASSOC);
                     $product_name = $product ? $product['name'] : 'Produit inconnu';
                     
+                    throw new Exception("Stock insuffisant pour \"$product_name\". Disponible: $available_quantity unité(s), Demandé: $quantity unité(s).");
+                }
+                
+                // Vérifier que le prix de vente n'est pas inférieur au coût d'achat
+                if ($unit_price < $stock['cost_price']) {
                     throw new Exception("Le prix de vente pour \"$product_name\" (".number_format($unit_price, 2, ',', ' ')." €) est inférieur au coût d'achat (".number_format($stock['cost_price'], 2, ',', ' ')." €).");
                 }
             }

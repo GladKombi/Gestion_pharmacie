@@ -1,7 +1,22 @@
 <?php
 // Configuration de la base de données
 require_once '../connexion/connexion.php';
-require_once '../includes/functions.php';
+require_once '../includes/functions.php'; // Assurez-vous que cette fonction inclut buildQueryString si elle n'est pas dans functions.php
+
+// Fonction utilitaire pour la pagination (à placer dans includes/functions.php si ce n'est pas déjà fait)
+if (!function_exists('buildQueryString')) {
+    function buildQueryString(array $new_params = [])
+    {
+        $current_params = $_GET;
+        $params = array_merge($current_params, $new_params);
+        // Supprimer les paramètres vides, sauf si la valeur est '0'
+        $filtered_params = array_filter($params, function ($value, $key) {
+            return $value !== '' || $key === 'status_filter';
+        }, ARRAY_FILTER_USE_BOTH);
+        return http_build_query($filtered_params);
+    }
+}
+
 
 // Vérifier si la session est démarrée
 if (session_status() === PHP_SESSION_NONE) {
@@ -28,7 +43,7 @@ $where_conditions = ["1=1"];
 $params = [];
 
 if (!empty($search)) {
-    $where_conditions[] = "(customer_name LIKE ? OR id LIKE ?)";
+    $where_conditions[] = "(customer_name LIKE ? OR s.id LIKE ?)";
     $search_term = "%$search%";
     $params[] = $search_term;
     $params[] = $search_term;
@@ -39,7 +54,8 @@ if (!empty($date_filter)) {
     $params[] = $date_filter;
 }
 
-if (!empty($status_filter)) {
+// Inclure le statut si ce n'est pas une chaîne vide (pour inclure 0)
+if ($status_filter !== '') {
     $where_conditions[] = "statut = ?";
     $params[] = $status_filter;
 }
@@ -49,8 +65,8 @@ $where_sql = implode(" AND ", $where_conditions);
 // Requête pour les ventes avec pagination
 $sql = "
     SELECT s.*, 
-           COUNT(si.id) as items_count,
-           SUM(si.quantity * si.unit_price) as total_amount
+            COUNT(si.id) as items_count,
+            SUM(si.quantity * si.unit_price) as total_amount
     FROM sales s 
     LEFT JOIN sale_items si ON s.id = si.sale_id 
     WHERE $where_sql
@@ -100,7 +116,7 @@ $average_sale = $stats['average_sale'] ?? 0;
 // Récupérer les produits et stocks pour le modal avec les coûts d'achat
 $products_stmt = $pdo->prepare("
     SELECT p.id, p.name, 
-           s.id as stock_id, s.current_quantity, s.expiry_date, s.price as cost_price
+            s.id as stock_id, s.current_quantity, s.expiry_date, s.price as cost_price
     FROM products p 
     LEFT JOIN stock s ON p.id = s.product_id AND s.statut = 1 AND s.current_quantity > 0
     WHERE p.statut = 1
@@ -120,7 +136,7 @@ foreach ($products_data as $row) {
             'stocks' => []
         ];
     }
-    
+
     if ($row['stock_id']) {
         $products[$product_id]['stocks'][] = [
             'stock_id' => $row['stock_id'],
@@ -279,10 +295,8 @@ foreach ($products_data as $row) {
 </head>
 
 <body class="bg-gray-100">
-    <!-- Overlay pour mobile -->
     <div id="sidebar-overlay" class="sidebar-overlay lg:hidden"></div>
 
-    <!-- Sidebar -->
     <aside id="sidenav-main" class="fixed top-0 left-0 h-full w-64 bg-white shadow-xl z-50 sidebar-mobile lg:translate-x-0">
         <div class="p-4 border-b border-gray-200 flex justify-between items-center">
             <a class="flex items-center space-x-2" href="#">
@@ -367,9 +381,7 @@ foreach ($products_data as $row) {
             </div>
         </nav>
 
-        <!-- Contenu principal -->
         <div class="dashboard-container">
-            <!-- Messages de notification -->
             <?php if (isset($_SESSION['message'])): ?>
                 <div class="mb-4 p-4 rounded-lg <?php echo $_SESSION['message']['type'] == 'success' ? 'bg-green-100 border border-green-400 text-green-700' : 'bg-red-100 border border-red-400 text-red-700'; ?>">
                     <?php echo htmlspecialchars($_SESSION['message']['text']); ?>
@@ -377,7 +389,6 @@ foreach ($products_data as $row) {
                 </div>
             <?php endif; ?>
 
-            <!-- En-tête avec boutons d'action -->
             <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h1 class="text-2xl font-bold text-gray-900">Gestion des Ventes - FOAMIS Sarl</h1>
@@ -391,7 +402,6 @@ foreach ($products_data as $row) {
                 </div>
             </div>
 
-            <!-- Statistiques rapides -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div class="bg-white rounded-xl p-4 shadow-md border-l-4 border-green-500">
                     <div class="flex justify-between items-center">
@@ -430,7 +440,6 @@ foreach ($products_data as $row) {
                 </div>
             </div>
 
-            <!-- Filtres -->
             <div class="bg-white shadow-md rounded-xl p-4 mb-6">
                 <form method="GET" class="flex flex-col sm:flex-row gap-4 items-end">
                     <div class="flex-1">
@@ -453,7 +462,7 @@ foreach ($products_data as $row) {
                         </select>
                     </div>
                     <div>
-                        <button type="submit" class="px-4 py-2 pharma-primary text-white rounded-lg hover:opacity-90">
+                        <button type="submit" class="px-4 py-2 pharma-primary text-white rounded-lg hover:opacity-90 flex items-center">
                             <i class="material-symbols-rounded text-base mr-2">search</i>
                             Filtrer
                         </button>
@@ -461,7 +470,6 @@ foreach ($products_data as $row) {
                 </form>
             </div>
 
-            <!-- Liste des ventes -->
             <div class="bg-white shadow-md rounded-xl overflow-hidden mb-6">
                 <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                     <h2 class="text-lg font-semibold text-gray-900">
@@ -525,10 +533,16 @@ foreach ($products_data as $row) {
                                                 data-id="<?php echo $sale['id']; ?>">
                                                 Détails
                                             </button>
+
                                             <?php if ($sale['statut'] == 1): ?>
-                                                <button class="text-red-600 hover:text-red-900 cancel-sale-btn" 
-                                                        data-id="<?php echo $sale['id']; ?>"
-                                                        data-customer_name="<?php echo htmlspecialchars($sale['customer_name']); ?>">
+                                                <a href="../models/select/print_invoice.php?sale_id=<?php echo $sale['id']; ?>" target="_blank" class="text-blue-600 hover:text-blue-900 mr-3">
+                                                    Imprimer
+                                                </a>
+                                            <?php endif; ?>
+                                            <?php if ($sale['statut'] == 1): ?>
+                                                <button class="text-red-600 hover:text-red-900 cancel-sale-btn"
+                                                    data-id="<?php echo $sale['id']; ?>"
+                                                    data-customer_name="<?php echo htmlspecialchars($sale['customer_name']); ?>">
                                                     Annuler
                                                 </button>
                                             <?php endif; ?>
@@ -540,7 +554,6 @@ foreach ($products_data as $row) {
                     <?php endif; ?>
                 </div>
 
-                <!-- Pagination -->
                 <?php if ($total_pages > 1): ?>
                     <div class="px-6 py-4 border-t border-gray-200">
                         <div class="flex justify-between items-center">
@@ -574,7 +587,6 @@ foreach ($products_data as $row) {
         </div>
     </main>
 
-    <!-- Modal Nouvelle Vente -->
     <div id="sale-modal" class="modal">
         <div class="modal-content">
             <div class="p-6 border-b border-gray-200 flex justify-between items-center">
@@ -594,21 +606,20 @@ foreach ($products_data as $row) {
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">Date de vente *</label>
-                                <input type="datetime-local" name="sale_date" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" required 
-                                       value="<?php echo date('Y-m-d\TH:i'); ?>">
+                                <input type="datetime-local" name="sale_date" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" required
+                                    value="<?php echo date('Y-m-d\TH:i'); ?>">
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">Nom du client</label>
-                                <input type="text" name="customer_name" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" 
-                                       placeholder="Nom du client (optionnel)">
+                                <input type="text" name="customer_name" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                                    placeholder="Nom du client (optionnel)">
                             </div>
                         </div>
                     </div>
 
-                    <!-- Panier -->
                     <div class="mb-6">
                         <h4 class="text-lg font-semibold text-gray-900 mb-4">Panier</h4>
-                        
+
                         <div class="bg-gray-50 rounded-lg p-4 mb-4">
                             <div class="grid grid-cols-12 gap-4 mb-2 text-sm font-medium text-gray-700">
                                 <div class="col-span-4">Produit</div>
@@ -617,17 +628,16 @@ foreach ($products_data as $row) {
                                 <div class="col-span-2">Prix Unitaire</div>
                                 <div class="col-span-2">Total</div>
                             </div>
-                            
+
                             <div id="cart-items">
-                                <!-- Les articles du panier seront ajoutés ici dynamiquement -->
                             </div>
-                            
+
                             <div class="mt-4 flex justify-between items-center">
                                 <button type="button" id="add-cart-item" class="px-4 py-2 text-sm font-medium text-green-600 border border-green-600 rounded-lg hover:bg-green-50 flex items-center">
                                     <i class="material-symbols-rounded text-base mr-2">add</i>
                                     Ajouter un article
                                 </button>
-                                
+
                                 <div class="text-right">
                                     <div class="text-lg font-semibold text-gray-900">
                                         Total: <span id="cart-total">0.00</span> €
@@ -646,9 +656,9 @@ foreach ($products_data as $row) {
                 </form>
             </div>
         </div>
+
     </div>
 
-    <!-- Modal Détails Vente -->
     <div id="sale-details-modal" class="modal">
         <div class="modal-content">
             <div class="p-6 border-b border-gray-200 flex justify-between items-center">
@@ -659,13 +669,18 @@ foreach ($products_data as $row) {
             </div>
             <div class="p-6">
                 <div id="sale-details-content">
-                    <!-- Contenu chargé dynamiquement -->
+                </div>
+                <div class="mt-6 border-t border-gray-200 pt-6 flex justify-end gap-3">
+                    <a id="print-invoice-btn" href="#" target="_blank" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 flex items-center">
+                        <i class="material-symbols-rounded text-base mr-2">print</i>
+                        Imprimer la Facture
+                    </a>
+                    <button type="button" class="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 close-modal">Fermer</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Modal de confirmation d'annulation -->
     <div id="cancel-confirm-modal" class="modal">
         <div class="modal-content delete-modal">
             <div class="p-6 border-b border-gray-200 flex justify-between items-center">
@@ -674,29 +689,25 @@ foreach ($products_data as $row) {
                     <i class="material-symbols-rounded">close</i>
                 </button>
             </div>
-            
+
             <div class="p-6">
                 <div class="text-center">
                     <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
                         <i class="material-symbols-rounded text-red-600 text-2xl">warning</i>
                     </div>
                     <h4 class="text-lg font-medium text-gray-900 mb-2">Êtes-vous sûr de vouloir annuler cette vente ?</h4>
-                    <p class="text-gray-600 mb-4">La vente pour "<span id="sale-to-cancel-name" class="font-semibold"></span>" sera annulée.</p>
-                    <p class="text-sm text-red-600 mb-6">Les stocks seront réapprovisionnés.</p>
+                    <p class="text-gray-600 mb-4">La vente pour **"<span id="sale-to-cancel-name" class="font-semibold"></span>"** sera annulée et les stocks seront remis à jour.</p>
                 </div>
-                
+
                 <form id="cancel-sale-form" method="POST" action="../models/traitement/sale-post.php">
                     <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                     <input type="hidden" name="action_sale" value="annuler">
-                    <input type="hidden" name="id" id="sale-to-cancel-id">
+                    <input type="hidden" name="sale_id" id="sale-id-to-cancel">
                     <input type="hidden" name="redirect_params" value="<?php echo http_build_query($_GET); ?>">
-                    
-                    <div class="flex justify-end gap-3">
+
+                    <div class="mt-6 flex justify-center gap-4">
                         <button type="button" class="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 close-modal">Annuler</button>
-                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 flex items-center">
-                            <i class="material-symbols-rounded text-base mr-2">cancel</i>
-                            Annuler la Vente
-                        </button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700">Confirmer l'Annulation</button>
                     </div>
                 </form>
             </div>
@@ -704,503 +715,338 @@ foreach ($products_data as $row) {
     </div>
 
     <script>
-        // Gestion de la sidebar
-        const sidebar = document.getElementById('sidenav-main');
-        const overlay = document.getElementById('sidebar-overlay');
-        const toggleButton = document.getElementById('toggle-sidebar');
-        const closeButton = document.getElementById('close-sidebar');
+        document.addEventListener('DOMContentLoaded', function() {
+            // ... (Sidebar, Modal Generic Functionality) ...
 
-        toggleButton.addEventListener('click', () => {
-            sidebar.classList.add('open');
-            overlay.classList.add('open');
-        });
+            const saleModal = document.getElementById('sale-modal');
+            const saleDetailsModal = document.getElementById('sale-details-modal');
+            const cancelConfirmModal = document.getElementById('cancel-confirm-modal');
 
-        closeButton.addEventListener('click', () => {
-            sidebar.classList.remove('open');
-            overlay.classList.remove('open');
-        });
+            document.getElementById('open-sale-modal').addEventListener('click', () => saleModal.classList.add('open'));
 
-        overlay.addEventListener('click', () => {
-            sidebar.classList.remove('open');
-            overlay.classList.remove('open');
-        });
-
-        // Données des produits
-        const products = <?php echo json_encode($products); ?>;
-
-        // Gestion des modales
-        const saleModal = document.getElementById('sale-modal');
-        const saleDetailsModal = document.getElementById('sale-details-modal');
-        const cancelConfirmModal = document.getElementById('cancel-confirm-modal');
-        const openSaleModalBtn = document.getElementById('open-sale-modal');
-        const closeModalBtns = document.querySelectorAll('.close-modal');
-        const viewSaleBtns = document.querySelectorAll('.view-sale');
-        const cancelSaleBtns = document.querySelectorAll('.cancel-sale-btn');
-
-        // Variables du panier
-        let cartItems = [];
-        let cartItemCounter = 0;
-
-        // Fonction pour mettre à jour le total du panier
-        function updateCartTotal() {
-            let total = 0;
-            cartItems.forEach(item => {
-                total += item.quantity * item.unitPrice;
+            document.querySelectorAll('.close-modal').forEach(button => {
+                button.addEventListener('click', function() {
+                    saleModal.classList.remove('open');
+                    saleDetailsModal.classList.remove('open');
+                    cancelConfirmModal.classList.remove('open');
+                });
             });
-            document.getElementById('cart-total').textContent = total.toFixed(2);
-        }
 
-        // Fonction pour créer un sélecteur de produit
-        function createProductSelect(selectedProductId = '') {
-            const select = document.createElement('select');
-            select.className = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 product-select';
-            select.innerHTML = '<option value="">Sélectionner un produit</option>';
-            
-            Object.values(products).forEach(product => {
-                const option = document.createElement('option');
-                option.value = product.id;
-                option.textContent = product.name;
-                option.selected = product.id == selectedProductId;
-                select.appendChild(option);
-            });
-            
-            return select;
-        }
+            // ----------------------------------------------------
+            // GESTION DU PANIER (Logique existante de votre système)
+            // ----------------------------------------------------
 
-        // Fonction pour créer un sélecteur de stock
-        function createStockSelect(productId, selectedStockId = '') {
-            const select = document.createElement('select');
-            select.className = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 stock-select';
-            select.innerHTML = '<option value="">Sélectionner un stock</option>';
-            
-            if (productId && products[productId]) {
-                products[productId].stocks.forEach(stock => {
-                    const option = document.createElement('option');
-                    option.value = stock.stock_id;
-                    
-                    const today = new Date();
-                    const expiryDate = new Date(stock.expiry_date);
-                    let statusClass = '';
-                    
-                    if (expiryDate < today) {
-                        statusClass = 'expired-stock';
-                    } else if ((expiryDate - today) / (1000 * 60 * 60 * 24) <= 30) {
-                        statusClass = 'expiring-soon-stock';
+            const productsData = <?php echo json_encode(array_values($products)); ?>;
+            let cart = [];
+            let cartItemCount = 0;
+
+            function updateCartTotal() {
+                const total = cart.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+                document.getElementById('cart-total').textContent = total.toFixed(2).replace('.', ',');
+            }
+
+            function updateCartDisplay() {
+                const container = document.getElementById('cart-items');
+                container.innerHTML = '';
+
+                if (cart.length === 0) {
+                    container.innerHTML = '<p class="text-gray-500 text-center py-4">Le panier est vide.</p>';
+                }
+
+                cart.forEach((item, index) => {
+                    const row = document.createElement('div');
+                    row.className = 'grid grid-cols-12 gap-4 items-center py-2 cart-item';
+                    row.setAttribute('data-index', index);
+
+                    const product = productsData.find(p => p.id === item.product_id);
+                    const stock = product.stocks.find(s => s.stock_id === item.stock_id);
+
+                    let stockInfo = '';
+                    if (stock) {
+                        const expiryDate = new Date(stock.expiry_date);
+                        const today = new Date();
+                        const diffTime = expiryDate.getTime() - today.getTime();
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                        let stockClass = '';
+                        if (diffDays <= 0) {
+                            stockClass = 'expired-stock';
+                            stockInfo = `(Exp. **${stock.expiry_date}** - Stock: ${stock.current_quantity})`;
+                        } else if (diffDays <= 30) {
+                            stockClass = 'expiring-soon-stock';
+                            stockInfo = `(Exp. **${stock.expiry_date}** - Stock: ${stock.current_quantity})`;
+                        } else {
+                            stockInfo = `(Exp. ${stock.expiry_date} - Stock: ${stock.current_quantity})`;
+                        }
+                        stockInfo = `<span class="${stockClass}">${stockInfo}</span>`;
                     }
-                    
-                    option.innerHTML = `${stock.current_quantity} unité(s) - Exp: ${new Date(stock.expiry_date).toLocaleDateString('fr-FR')} <span class="stock-option ${statusClass}">${statusClass ? '⚠️' : ''}</span>`;
-                    option.setAttribute('data-max-quantity', stock.current_quantity);
-                    option.setAttribute('data-cost-price', stock.cost_price);
-                    option.selected = stock.stock_id == selectedStockId;
-                    select.appendChild(option);
+
+                    const priceWarning = stock && item.unit_price < stock.cost_price ?
+                        `<div class="price-error col-span-12 text-xs">Attention: Prix de vente (${item.unit_price} €) est inférieur au prix de revient (${stock.cost_price} €)</div>` : '';
+
+                    row.innerHTML = `
+                        <div class="col-span-4 text-sm text-gray-900 font-medium">${item.product_name}</div>
+                        <div class="col-span-2 text-xs text-gray-500">${stockInfo}</div>
+                        <div class="col-span-2">
+                            <input type="number" name="items[${index}][quantity]" value="${item.quantity}" min="1" max="${stock ? stock.current_quantity : 1}"
+                                class="w-full px-2 py-1 border border-gray-300 rounded-lg text-sm text-center quantity-input" data-index="${index}" required>
+                        </div>
+                        <div class="col-span-2">
+                            <input type="number" name="items[${index}][unit_price]" value="${item.unit_price}" step="0.01" min="0.01"
+                                class="w-full px-2 py-1 border border-gray-300 rounded-lg text-sm text-right price-input" data-index="${index}" required>
+                        </div>
+                        <div class="col-span-1 text-right text-sm font-semibold text-gray-900">${(item.quantity * item.unit_price).toFixed(2).replace('.', ',')} €</div>
+                        <div class="col-span-1 text-right">
+                            <button type="button" class="text-red-500 hover:text-red-700 remove-item" data-index="${index}">
+                                <i class="material-symbols-rounded text-base">delete</i>
+                            </button>
+                            <input type="hidden" name="items[${index}][product_id]" value="${item.product_id}">
+                            <input type="hidden" name="items[${index}][stock_id]" value="${item.stock_id}">
+                            <input type="hidden" name="items[${index}][cost_price]" value="${stock ? stock.cost_price : 0}">
+                        </div>
+                        ${priceWarning}
+                    `;
+                    container.appendChild(row);
+                });
+
+                attachCartListeners();
+                updateCartTotal();
+            }
+
+            function attachCartListeners() {
+                // Change Quantity/Price
+                document.querySelectorAll('.quantity-input, .price-input').forEach(input => {
+                    input.onchange = function() {
+                        const index = parseInt(this.dataset.index);
+                        const key = this.name.includes('quantity') ? 'quantity' : 'unit_price';
+                        let value = parseFloat(this.value);
+
+                        // Validation
+                        if (key === 'quantity') {
+                            const max = parseInt(this.max);
+                            value = Math.max(1, Math.min(max, Math.round(value))); // Au moins 1 et max stock
+                        } else {
+                            value = parseFloat(value.toFixed(2));
+                        }
+                        this.value = value;
+
+                        cart[index][key] = value;
+                        updateCartDisplay();
+                    };
+                });
+
+                // Remove Item
+                document.querySelectorAll('.remove-item').forEach(button => {
+                    button.onclick = function() {
+                        const index = parseInt(this.dataset.index);
+                        cart.splice(index, 1);
+                        updateCartDisplay();
+                    };
                 });
             }
-            
-            return select;
-        }
 
-        // Fonction pour créer un message d'alerte prix
-        function createPriceAlert(costPrice, currentPrice) {
-            const alertDiv = document.createElement('div');
-            const margin = ((currentPrice - costPrice) / costPrice * 100).toFixed(1);
-            
-            if (currentPrice < costPrice) {
-                alertDiv.className = 'price-error';
-                alertDiv.innerHTML = `
-                    <div class="flex items-center">
-                        <i class="material-symbols-rounded text-red-600 mr-2">error</i>
-                        <span class="text-sm font-medium text-red-800">
-                            ⚠️ Prix de vente inférieur au coût d'achat (${costPrice.toFixed(2)} €)
-                        </span>
-                    </div>
-                    <p class="text-xs text-red-600 mt-1">
-                        Perte: ${(costPrice - currentPrice).toFixed(2)} € (${Math.abs(margin)}%)
-                    </p>
-                `;
-            } else if (currentPrice < costPrice * 1.1) {
-                alertDiv.className = 'price-warning';
-                alertDiv.innerHTML = `
-                    <div class="flex items-center">
-                        <i class="material-symbols-rounded text-yellow-600 mr-2">warning</i>
-                        <span class="text-sm font-medium text-yellow-800">
-                            Marge faible: ${margin}%
-                        </span>
-                    </div>
-                    <p class="text-xs text-yellow-600 mt-1">
-                        Coût: ${costPrice.toFixed(2)} € | Prix actuel: ${currentPrice.toFixed(2)} €
-                    </p>
-                `;
-            } else {
-                alertDiv.className = 'hidden';
-            }
-            
-            return alertDiv;
-        }
+            document.getElementById('add-cart-item').addEventListener('click', function() {
+                const lastRow = document.createElement('div');
+                lastRow.className = 'grid grid-cols-12 gap-4 items-center py-2 cart-item';
 
-        // Fonction pour ajouter un article au panier
-        function addCartItem(productId = '', stockId = '', quantity = 1, unitPrice = 0) {
-            const cartItemsContainer = document.getElementById('cart-items');
-            const itemId = cartItemCounter++;
-            
-            const itemDiv = document.createElement('div');
-            itemDiv.className = 'cart-item grid grid-cols-12 gap-4 items-start';
-            itemDiv.innerHTML = `
-                <div class="col-span-4 product-select-container"></div>
-                <div class="col-span-2 stock-select-container"></div>
-                <div class="col-span-2">
-                    <input type="number" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 quantity-input" min="1" value="${quantity}">
-                </div>
-                <div class="col-span-2">
-                    <input type="number" step="0.01" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 price-input" min="0" value="${unitPrice}">
-                    <div class="price-alert-container mt-2"></div>
-                </div>
-                <div class="col-span-2 flex items-start justify-between">
-                    <div>
-                        <span class="item-total font-semibold block">${(quantity * unitPrice).toFixed(2)} €</span>
-                        <span class="item-margin text-xs text-gray-500 block mt-1"></span>
+                // Créer l'option du produit
+                let productOptions = '<option value="" selected disabled>Sélectionner un produit</option>';
+                productsData.forEach(p => {
+                    if (p.stocks.length > 0) {
+                        productOptions += `<option value="${p.id}" data-stocks='${JSON.stringify(p.stocks)}'>${p.name}</option>`;
+                    }
+                });
+
+                lastRow.innerHTML = `
+                    <div class="col-span-4">
+                        <select class="w-full px-2 py-1 border border-gray-300 rounded-lg text-sm product-select" required>
+                            ${productOptions}
+                        </select>
                     </div>
-                    <button type="button" class="text-red-600 hover:text-red-900 remove-item ml-2">
-                        <i class="material-symbols-rounded text-base">delete</i>
-                    </button>
-                </div>
-                <input type="hidden" name="cart_items[${itemId}][product_id]" class="product-id-input" value="${productId}">
-                <input type="hidden" name="cart_items[${itemId}][stock_id]" class="stock-id-input" value="${stockId}">
-                <input type="hidden" name="cart_items[${itemId}][quantity]" class="quantity-hidden-input" value="${quantity}">
-                <input type="hidden" name="cart_items[${itemId}][unit_price]" class="price-hidden-input" value="${unitPrice}">
-            `;
-            
-            cartItemsContainer.appendChild(itemDiv);
-            
-            // Ajouter les sélecteurs
-            const productSelectContainer = itemDiv.querySelector('.product-select-container');
-            const stockSelectContainer = itemDiv.querySelector('.stock-select-container');
-            const priceAlertContainer = itemDiv.querySelector('.price-alert-container');
-            
-            productSelectContainer.appendChild(createProductSelect(productId));
-            stockSelectContainer.appendChild(createStockSelect(productId, stockId));
-            
-            // Événements
-            const productSelect = productSelectContainer.querySelector('select');
-            const stockSelect = stockSelectContainer.querySelector('select');
-            const quantityInput = itemDiv.querySelector('.quantity-input');
-            const priceInput = itemDiv.querySelector('.price-input');
-            const removeBtn = itemDiv.querySelector('.remove-item');
-            const itemTotal = itemDiv.querySelector('.item-total');
-            const itemMargin = itemDiv.querySelector('.item-margin');
-            const quantityHiddenInput = itemDiv.querySelector('.quantity-hidden-input');
-            const priceHiddenInput = itemDiv.querySelector('.price-hidden-input');
-            const productIdInput = itemDiv.querySelector('.product-id-input');
-            const stockIdInput = itemDiv.querySelector('.stock-id-input');
-            
-            let currentCostPrice = 0;
-            
-            // Fonction pour mettre à jour les alertes de prix
-            function updatePriceAlerts() {
-                const currentPrice = parseFloat(priceInput.value) || 0;
-                
-                // Vider le conteneur d'alertes
-                priceAlertContainer.innerHTML = '';
-                
-                if (currentCostPrice > 0) {
-                    const alert = createPriceAlert(currentCostPrice, currentPrice);
-                    priceAlertContainer.appendChild(alert);
-                    
-                    // Calculer et afficher la marge
-                    const margin = currentPrice - currentCostPrice;
-                    const marginPercent = ((margin / currentCostPrice) * 100).toFixed(1);
-                    
-                    if (margin >= 0) {
-                        itemMargin.textContent = `+${marginPercent}%`;
-                        itemMargin.className = 'item-margin text-xs text-green-600 block mt-1';
-                    } else {
-                        itemMargin.textContent = `${marginPercent}%`;
-                        itemMargin.className = 'item-margin text-xs text-red-600 block mt-1';
-                    }
-                } else {
-                    itemMargin.textContent = '';
-                }
-            }
-            
-            // Événement changement de produit
-            productSelect.addEventListener('change', function() {
-                const selectedProductId = this.value;
-                productIdInput.value = selectedProductId;
-                
-                // Mettre à jour le sélecteur de stock
-                stockSelectContainer.innerHTML = '';
-                stockSelectContainer.appendChild(createStockSelect(selectedProductId));
-                
-                const newStockSelect = stockSelectContainer.querySelector('select');
-                newStockSelect.addEventListener('change', handleStockChange);
-                
-                updateItemTotal();
-            });
-            
-            // Événement changement de stock
-            stockSelect.addEventListener('change', handleStockChange);
-            
-            function handleStockChange() {
-                const selectedStockId = this.value;
-                stockIdInput.value = selectedStockId;
-                
-                // Mettre à jour la quantité maximale et le coût d'achat
-                const selectedOption = this.options[this.selectedIndex];
-                if (selectedOption && selectedOption.value) {
-                    const maxQuantity = parseInt(selectedOption.getAttribute('data-max-quantity'));
-                    currentCostPrice = parseFloat(selectedOption.getAttribute('data-cost-price'));
-                    
-                    quantityInput.max = maxQuantity;
-                    if (quantityInput.value > maxQuantity) {
-                        quantityInput.value = maxQuantity;
-                        quantityHiddenInput.value = maxQuantity;
-                    }
-                    
-                    // Définir le prix minimum suggéré
-                    if (currentCostPrice > 0) {
-                        priceInput.min = currentCostPrice;
-                        // Si le prix actuel est inférieur au coût, le mettre à jour
-                        if (parseFloat(priceInput.value) < currentCostPrice) {
-                            priceInput.value = currentCostPrice.toFixed(2);
-                            priceHiddenInput.value = currentCostPrice.toFixed(2);
+                    <div class="col-span-2">
+                        <select class="w-full px-2 py-1 border border-gray-300 rounded-lg text-sm stock-select" disabled required>
+                            <option value="" selected disabled>Sélectionner un stock</option>
+                        </select>
+                    </div>
+                    <div class="col-span-2">
+                        <input type="number" value="1" min="1" class="w-full px-2 py-1 border border-gray-300 rounded-lg text-sm text-center new-quantity-input" disabled required>
+                    </div>
+                    <div class="col-span-2">
+                        <input type="number" step="0.01" value="0.00" min="0.01" class="w-full px-2 py-1 border border-gray-300 rounded-lg text-sm text-right new-price-input" disabled required>
+                    </div>
+                    <div class="col-span-1 text-right text-sm font-semibold text-gray-400">0.00 €</div>
+                    <div class="col-span-1 text-right">
+                        <button type="button" class="text-green-500 hover:text-green-700 add-to-cart-btn" disabled>
+                            <i class="material-symbols-rounded text-base">check</i>
+                        </button>
+                    </div>
+                `;
+
+                document.getElementById('cart-items').appendChild(lastRow);
+
+                const productSelect = lastRow.querySelector('.product-select');
+                const stockSelect = lastRow.querySelector('.stock-select');
+                const quantityInput = lastRow.querySelector('.new-quantity-input');
+                const priceInput = lastRow.querySelector('.new-price-input');
+                const addToCartBtn = lastRow.querySelector('.add-to-cart-btn');
+
+                // Listener pour le changement de produit
+                productSelect.onchange = function() {
+                    stockSelect.innerHTML = '<option value="" selected disabled>Sélectionner un stock</option>';
+                    stockSelect.disabled = false;
+                    const selectedOption = this.options[this.selectedIndex];
+                    const stocks = JSON.parse(selectedOption.dataset.stocks);
+
+                    stocks.forEach(s => {
+                        const expiryDate = new Date(s.expiry_date);
+                        const today = new Date();
+                        const diffTime = expiryDate.getTime() - today.getTime();
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                        let info = `Stock: ${s.current_quantity} - Exp: ${s.expiry_date}`;
+                        let stockClass = '';
+                        if (diffDays <= 0) {
+                            stockClass = 'expired-stock';
+                            info = `ATTENTION EXPIRÉ - Stock: ${s.current_quantity}`;
+                        } else if (diffDays <= 30) {
+                            stockClass = 'expiring-soon-stock';
+                            info = `Expire bientôt - Stock: ${s.current_quantity}`;
                         }
+
+                        const option = document.createElement('option');
+                        option.value = s.stock_id;
+                        option.textContent = info;
+                        option.className = stockClass;
+                        option.dataset.maxQuantity = s.current_quantity;
+                        option.dataset.costPrice = s.cost_price;
+
+                        stockSelect.appendChild(option);
+                    });
+
+                    priceInput.value = '0.00';
+                    quantityInput.value = '1';
+                    quantityInput.max = '1';
+                    priceInput.disabled = true;
+                    quantityInput.disabled = true;
+                    addToCartBtn.disabled = true;
+                };
+
+                // Listener pour le changement de stock
+                stockSelect.onchange = function() {
+                    const selectedStock = this.options[this.selectedIndex];
+                    const maxQuantity = parseInt(selectedStock.dataset.maxQuantity);
+                    const costPrice = parseFloat(selectedStock.dataset.costPrice);
+
+                    quantityInput.max = maxQuantity;
+                    quantityInput.value = Math.min(1, maxQuantity); // Set quantity to 1 or max if max < 1
+                    quantityInput.disabled = false;
+                    priceInput.disabled = false;
+                    addToCartBtn.disabled = false;
+                };
+
+                // Listener pour l'ajout au panier
+                addToCartBtn.onclick = function() {
+                    const productOption = productSelect.options[productSelect.selectedIndex];
+                    const stockOption = stockSelect.options[stockSelect.selectedIndex];
+
+                    const newItem = {
+                        product_id: parseInt(productSelect.value),
+                        product_name: productOption.textContent.trim(),
+                        stock_id: parseInt(stockSelect.value),
+                        quantity: parseInt(quantityInput.value),
+                        unit_price: parseFloat(priceInput.value),
+                        cost_price: parseFloat(stockOption.dataset.costPrice)
+                    };
+
+                    // Simple validation pour ne pas ajouter si les champs sont invalides (quantité/prix)
+                    if (newItem.quantity > 0 && newItem.unit_price > 0) {
+                        cart.push(newItem);
+                        document.getElementById('cart-items').removeChild(lastRow);
+                        updateCartDisplay();
+                    } else {
+                        alert("Veuillez entrer une quantité et un prix valides.");
                     }
-                }
-                
-                updatePriceAlerts();
-                updateItemTotal();
-            }
-            
-            // Événement changement de quantité
-            quantityInput.addEventListener('input', function() {
-                const maxQuantity = parseInt(this.max) || Infinity;
-                if (this.value > maxQuantity) {
-                    this.value = maxQuantity;
-                }
-                quantityHiddenInput.value = this.value;
-                updateItemTotal();
+                };
             });
-            
-            // Événement changement de prix
-            priceInput.addEventListener('input', function() {
-                const price = parseFloat(this.value) || 0;
-                
-                // Empêcher la vente en dessous du coût
-                if (currentCostPrice > 0 && price < currentCostPrice) {
-                    this.classList.add('border-red-500', 'bg-red-50');
-                } else {
-                    this.classList.remove('border-red-500', 'bg-red-50');
-                }
-                
-                priceHiddenInput.value = this.value;
-                updatePriceAlerts();
-                updateItemTotal();
-            });
-            
-            // Événement suppression
-            removeBtn.addEventListener('click', function() {
-                itemDiv.remove();
-                updateCartTotal();
-            });
-            
-            function updateItemTotal() {
-                const total = (parseFloat(quantityInput.value) || 0) * (parseFloat(priceInput.value) || 0);
-                itemTotal.textContent = total.toFixed(2) + ' €';
-                updateCartTotal();
-            }
-            
-            // Initialiser les alertes de prix
-            if (stockId) {
-                const selectedOption = stockSelect.options[stockSelect.selectedIndex];
-                if (selectedOption && selectedOption.value) {
-                    currentCostPrice = parseFloat(selectedOption.getAttribute('data-cost-price')) || 0;
-                }
-            }
-            updatePriceAlerts();
-            
-            // Ajouter au tableau cartItems
-            cartItems.push({
-                itemId: itemId,
-                productId: productId,
-                stockId: stockId,
-                quantity: quantity,
-                unitPrice: unitPrice
-            });
-        }
 
-        // Ouvrir modal vente
-        openSaleModalBtn.addEventListener('click', () => {
-            saleModal.classList.add('open');
-            // Ajouter un article vide au panier
-            document.getElementById('cart-items').innerHTML = '';
-            cartItems = [];
-            addCartItem();
-        });
+            // ----------------------------------------------------
+            // GESTION DES DÉTAILS VENTE ET ANNULATION
+            // ----------------------------------------------------
 
-        // Fermer modales
-        closeModalBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                saleModal.classList.remove('open');
-                saleDetailsModal.classList.remove('open');
-                cancelConfirmModal.classList.remove('open');
-            });
-        });
+            // Fonction de chargement des détails de vente (MISE À JOUR)
+            document.querySelectorAll('.view-sale').forEach(button => {
+                button.addEventListener('click', function() {
+                    const saleId = this.dataset.id;
 
-        // Ajouter un article au panier
-        document.getElementById('add-cart-item').addEventListener('click', () => {
-            addCartItem();
-        });
+                    // MISE À JOUR : Mise à jour du lien d'impression dans le modal
+                    const printBtn = document.getElementById('print-invoice-btn');
+                    printBtn.href = `../models/select/print_invoice.php?sale_id=${saleId}`;
 
-        // Voir les détails d'une vente
-        viewSaleBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const saleId = btn.getAttribute('data-id');
-                
-                fetch(`../models/select/get-sale-details.php?id=${saleId}`)
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            document.getElementById('sale-details-content').innerHTML = data.html;
-                            saleDetailsModal.classList.add('open');
-                        } else {
+                    fetch(`../models/traitement/get_sale_details.php?id=${saleId}`)
+                        .then(response => response.text())
+                        .then(data => {
+                            document.getElementById('sale-details-content').innerHTML = data;
+
+                            // Vérifier si la vente est annulée pour masquer/afficher le bouton d'impression
+                            // Le contenu de get_sale_details.php devrait fournir l'info de statut ou nous laisser utiliser l'ID
+                            // Pour l'instant, on affiche le bouton, mais si vous voulez le masquer pour les annulées, 
+                            // il faudrait modifier get_sale_details.php pour renvoyer le statut
+
+                            document.getElementById('sale-details-modal').classList.add('open');
+                        })
+                        .catch(error => {
+                            console.error('Erreur lors du chargement des détails de la vente:', error);
                             Toastify({
-                                text: "Erreur lors du chargement des détails",
+                                text: "Erreur lors du chargement des détails de la vente.",
                                 duration: 3000,
+                                close: true,
                                 gravity: "top",
                                 position: "right",
                                 style: {
-                                    background: "linear-gradient(to right, #ef4444, #dc2626)",
+                                    background: "#dc2626"
                                 },
                             }).showToast();
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Erreur:', error);
-                        Toastify({
-                            text: "Erreur lors du chargement des détails",
-                            duration: 3000,
-                            gravity: "top",
-                            position: "right",
-                            style: {
-                                background: "linear-gradient(to right, #ef4444, #dc2626)",
-                            },
-                        }).showToast();
-                    });
+                        });
+                });
             });
-        });
 
-        // Annuler une vente
-        cancelSaleBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const saleId = btn.getAttribute('data-id');
-                const customerName = btn.getAttribute('data-customer_name');
-                
-                document.getElementById('sale-to-cancel-id').value = saleId;
-                document.getElementById('sale-to-cancel-name').textContent = customerName;
-                
-                cancelConfirmModal.classList.add('open');
+            // Boutons d'annulation de vente
+            document.querySelectorAll('.cancel-sale-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const saleId = this.dataset.id;
+                    const customerName = this.dataset.customer_name || 'Vente n°' + saleId;
+
+                    document.getElementById('sale-id-to-cancel').value = saleId;
+                    document.getElementById('sale-to-cancel-name').textContent = customerName;
+                    cancelConfirmModal.classList.add('open');
+                });
             });
-        });
 
-        // Validation du formulaire de vente
-        document.getElementById('sale-form').addEventListener('submit', function(e) {
-            const cartItems = document.querySelectorAll('.cart-item');
-            let isValid = true;
-            let errorMessage = '';
-            let hasPriceError = false;
-            
-            if (cartItems.length === 0) {
-                isValid = false;
-                errorMessage = "Veuillez ajouter au moins un article au panier";
-            }
-            
-            cartItems.forEach(item => {
-                const productSelect = item.querySelector('.product-select');
-                const stockSelect = item.querySelector('.stock-select');
-                const quantityInput = item.querySelector('.quantity-input');
-                const priceInput = item.querySelector('.price-input');
-                const priceAlert = item.querySelector('.price-error');
-                
-                if (!productSelect.value) {
-                    isValid = false;
-                    errorMessage = "Veuillez sélectionner un produit pour tous les articles";
-                }
-                
-                if (!stockSelect.value) {
-                    isValid = false;
-                    errorMessage = "Veuillez sélectionner un stock pour tous les articles";
-                }
-                
-                if (!quantityInput.value || quantityInput.value <= 0) {
-                    isValid = false;
-                    errorMessage = "Veuillez saisir une quantité valide pour tous les articles";
-                }
-                
-                if (!priceInput.value || priceInput.value <= 0) {
-                    isValid = false;
-                    errorMessage = "Veuillez saisir un prix valide pour tous les articles";
-                }
-                
-                // Vérifier que la quantité ne dépasse pas le stock disponible
-                const maxQuantity = parseInt(stockSelect.options[stockSelect.selectedIndex]?.getAttribute('data-max-quantity')) || 0;
-                if (parseInt(quantityInput.value) > maxQuantity) {
-                    isValid = false;
-                    errorMessage = `La quantité demandée dépasse le stock disponible (${maxQuantity} unités)`;
-                }
-                
-                // Vérifier les prix inférieurs au coût
-                if (priceAlert) {
-                    hasPriceError = true;
-                }
+            // ----------------------------------------------------
+            // Sidebar Mobile Toggle
+            // ----------------------------------------------------
+            const sidebar = document.getElementById('sidenav-main');
+            const overlay = document.getElementById('sidebar-overlay');
+            const toggleSidebar = document.getElementById('toggle-sidebar');
+            const closeSidebar = document.getElementById('close-sidebar');
+
+            toggleSidebar.addEventListener('click', () => {
+                sidebar.classList.add('open');
+                overlay.classList.add('open');
             });
-            
-            if (hasPriceError) {
-                isValid = false;
-                errorMessage = "Certains articles sont vendus en dessous du coût d'achat. Veuillez corriger les prix.";
-            }
-            
-            if (!isValid) {
-                e.preventDefault();
-                Toastify({
-                    text: errorMessage,
-                    duration: 5000,
-                    gravity: "top",
-                    position: "right",
-                    stopOnFocus: true,
-                    style: {
-                        background: "linear-gradient(to right, #ef4444, #dc2626)",
-                    },
-                }).showToast();
-            }
+
+            closeSidebar.addEventListener('click', () => {
+                sidebar.classList.remove('open');
+                overlay.classList.remove('open');
+            });
+
+            overlay.addEventListener('click', () => {
+                sidebar.classList.remove('open');
+                overlay.classList.remove('open');
+            });
+            // ----------------------------------------------------
+
         });
-
-        // Fermer modales en cliquant en dehors
-        window.addEventListener('click', (e) => {
-            if (e.target === saleModal) {
-                saleModal.classList.remove('open');
-            }
-            if (e.target === saleDetailsModal) {
-                saleDetailsModal.classList.remove('open');
-            }
-            if (e.target === cancelConfirmModal) {
-                cancelConfirmModal.classList.remove('open');
-            }
-        });
-
-        // Vérifie si un message de session est présent
-        <?php if (isset($_SESSION['message'])): ?>
-            Toastify({
-                text: "<?= htmlspecialchars($_SESSION['message']['text']) ?>",
-                duration: 3000,
-                gravity: "top",
-                position: "right",
-                stopOnFocus: true,
-                style: {
-                    background: "linear-gradient(to right, <?= ($_SESSION['message']['type'] == 'success') ? '#22c55e, #16a34a' : '#ef4444, #dc2626' ?>)",
-                },
-            }).showToast();
-
-            <?php unset($_SESSION['message']); ?>
-        <?php endif; ?>
     </script>
 </body>
 
